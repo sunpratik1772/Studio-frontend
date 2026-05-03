@@ -154,6 +154,48 @@ gcloud run deploy studio-frontend \
   --max-instances 10
 ```
 
+### Why a Cloud Build `--substitutions` flag isn't enough
+
+`gcloud builds submit --tag …` builds a single image and **does not** forward
+arbitrary substitutions into Docker `--build-arg`. Use one of these instead:
+
+**Option A — buildx + Artifact Registry (one-liner):**
+
+```bash
+gcloud auth configure-docker us-central1-docker.pkg.dev
+docker buildx build \
+  --platform linux/amd64 \
+  --build-arg VITE_API_BASE_URL=$BACKEND_URL \
+  --tag us-central1-docker.pkg.dev/$PROJECT_ID/studio/studio-frontend:latest \
+  --push .
+```
+
+**Option B — `cloudbuild.yaml`:**
+
+```yaml
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --build-arg
+      - VITE_API_BASE_URL=${_VITE_API_BASE_URL}
+      - -t
+      - us-central1-docker.pkg.dev/$PROJECT_ID/studio/studio-frontend:latest
+      - .
+images:
+  - us-central1-docker.pkg.dev/$PROJECT_ID/studio/studio-frontend:latest
+substitutions:
+  _VITE_API_BASE_URL: ""
+```
+
+Then:
+
+```bash
+gcloud builds submit \
+  --config cloudbuild.yaml \
+  --substitutions=_VITE_API_BASE_URL=$BACKEND_URL .
+```
+
 ### CORS
 
 The backend defaults to `CORS_ORIGIN=*`. In production, lock it down to
@@ -192,6 +234,24 @@ backend env var (see above).
 The inline script in `index.html` should run before React mounts.
 If you've moved/removed it, restore the snippet that reads
 `localStorage["clawstudio.theme"]` synchronously in `<head>`.
+
+---
+
+## Keeping in sync with the monorepo
+
+This repo is a **published snapshot** of the monorepo. The directories below
+are inlined copies of upstream packages:
+
+| Path here                | Upstream in monorepo                    |
+| ------------------------ | --------------------------------------- |
+| `src/` (excl. `lib/`)    | `artifacts/clawstudio/src/`             |
+| `src/lib/api-client/`    | `lib/api-client-react/src/`             |
+| `index.html`, `components.json`, `public/` | `artifacts/clawstudio/`     |
+
+The shared import path `@workspace/api-client-react` is preserved in the
+source and resolved at both typecheck time (tsconfig `paths`) and build time
+(Vite `resolve.alias`), so refreshing only requires recopying the files —
+no source rewrites.
 
 ---
 
